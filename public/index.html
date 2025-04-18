@@ -1,146 +1,216 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>Guessing Game</title>
-  <style>
-    /* Simple styling for chat and controls */
-    #chat { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 5px; }
-    #messageInput { width: 80%; }
+   <style>
+    body {
+      font-family: Georgia, 'Times New Roman', Times, serif;
+      background: #f0f0f0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h1 {
+      margin-top: 20px;
+      color: #333;
+    }
+    .container {
+      width: 90%;
+      max-width: 800px;
+      background: #fff;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    #chat {
+      border: 1px solid #ccc;
+      height: 300px;
+      overflow-y: scroll;
+      padding: 10px;
+      background: #fafafa;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    input[type="text"] {
+      width: calc(100% - 22px);
+      padding: 10px;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .controls > * {
+      flex: 1;
+    }
+    .hidden {
+      display: none;
+    }
+    
+    #masterControls.hidden, #gameControls.hidden {
+      display: none;
+    }
   </style>
 </head>
+
 <body>
   <h1>Guessing Game</h1>
-  
-  <!-- Chat display -->
-  <div id="chat"></div>
-  
-  <!-- Chat input -->
-  <input type="text" id="messageInput" placeholder="Type a message or command" />
-  <button id="sendBtn">Send</button>
-  
-  <hr/>
-  
-  <div id="gameControls">
-    <!-- Session controls -->
-    <button id="createSessionBtn">Create Session (Game Master)</button>
-    <input type="text" id="sessionIdInput" placeholder="Session ID to join" />
+
+  <div>
+    <input type="text" id="usernameInput" placeholder="Enter your name" required />
+    <button id="createSessionBtn">Create Session</button>
+    <input type="text" id="sessionIdInput" placeholder="Enter Session ID" />
     <button id="joinSessionBtn">Join Session</button>
-    <br/><br/>
-    <!-- Controls visible only for game master -->
-    <div id="masterControls" style="display:none;">
-      <input type="text" id="usernameInput" placeholder="Your username" />
-      <br/><br/>
-      <input type="text" id="questionInput" placeholder="Enter question" />
-      <input type="text" id="answerInput" placeholder="Enter answer" />
-      <button id="setQuestionBtn">Set Question</button>
-      <button id="startGameBtn">Start Game</button>
-    </div>
   </div>
-  
-  <!-- Include Socket.io client library -->
+
+  <div id="masterControls" class="hidden">
+    <h3>Game Master Controls</h3>
+    <input type="text" id="questionInput" placeholder="Enter question" />
+    <input type="text" id="answerInput" placeholder="Enter answer" />
+    <button id="setQuestionBtn">Set Question</button>
+    <button id="startGameBtn">Start Game</button>
+  </div>
+
+  <div id="gameControls" class="hidden">
+    <h3>Game</h3>
+    <input type="text" id="guessInput" placeholder="Your guess" />
+    <button id="guessBtn">Submit Guess</button>
+  </div>
+
+  <div>
+    <h3>Chat</h3>
+    <div id="chat" style="height: 200px; overflow-y: scroll; border: 1px solid #ccc;"></div>
+    <input type="text" id="messageInput" placeholder="Type a message" />
+    <button id="sendBtn">Send</button>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
+
+    // DOM Elements
     const chat = document.getElementById('chat');
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
-    
     const createSessionBtn = document.getElementById('createSessionBtn');
     const joinSessionBtn = document.getElementById('joinSessionBtn');
     const sessionIdInput = document.getElementById('sessionIdInput');
-    const masterControls = document.getElementById('masterControls');
     const usernameInput = document.getElementById('usernameInput');
+    const masterControls = document.getElementById('masterControls');
     const questionInput = document.getElementById('questionInput');
     const answerInput = document.getElementById('answerInput');
     const setQuestionBtn = document.getElementById('setQuestionBtn');
     const startGameBtn = document.getElementById('startGameBtn');
-    
+    const guessInput = document.getElementById('guessInput');
+    const guessBtn = document.getElementById('guessBtn');
+    const gameControls = document.getElementById('gameControls');
+
     let currentSessionId = '';
-    
-    // Helper to display messages in the chat div.
+
+    // Utility
     function addMessage(message) {
       const p = document.createElement('p');
       p.innerText = message;
       chat.appendChild(p);
       chat.scrollTop = chat.scrollHeight;
     }
-    
-    // Send a chat message.
+
+    // Event Emitters
     sendBtn.addEventListener('click', () => {
-      const msg = messageInput.value;
-      socket.emit('chatMessage', { msg });
-      messageInput.value = '';
+      const msg = messageInput.value.trim();
+      if (msg) {
+        socket.emit('chatMessage', { msg });
+        messageInput.value = '';
+      }
     });
-    
-    // Create session (as game master)
+
     createSessionBtn.addEventListener('click', () => {
-      const username = usernameInput.value || 'GameMaster';
+      const username = usernameInput.value.trim();
+      if (!username) return alert("Enter a name to create a session.");
       socket.emit('createSession', { username });
     });
-    
-    // Join an existing session
+
     joinSessionBtn.addEventListener('click', () => {
-      const sessionId = sessionIdInput.value;
-      const username = usernameInput.value || 'Player';
+      const sessionId = sessionIdInput.value.trim();
+      const username = usernameInput.value.trim();
+      if (!username || !sessionId) return alert("Enter your name and session ID.");
       socket.emit('joinSession', { sessionId, username });
     });
-    
-    // Set the question and answer (game master only)
+
     setQuestionBtn.addEventListener('click', () => {
-      const question = questionInput.value;
-      const answer = answerInput.value;
+      const question = questionInput.value.trim();
+      const answer = answerInput.value.trim();
+      if (!question || !answer) return alert("Enter both question and answer.");
       socket.emit('setQuestion', { question, answer });
     });
-    
-    // Start the game session (game master only)
+
     startGameBtn.addEventListener('click', () => {
       socket.emit('startGame');
     });
-    
-    // Handle session creation event.
+
+    guessBtn.addEventListener('click', () => {
+      const guess = guessInput.value.trim();
+      if (!guess) return;
+      socket.emit('guess', { guess });
+      guessInput.value = '';
+    });
+
+    // Event Listeners
     socket.on('sessionCreated', (data) => {
       currentSessionId = data.sessionId;
       addMessage(`Session created with ID: ${currentSessionId}`);
-      masterControls.style.display = 'block';
+      masterControls.classList.remove('hidden');
+      gameControls.classList.remove('hidden');
     });
-    
-    // Update session info: number of players and their scores.
+
     socket.on('sessionUpdate', (data) => {
       addMessage(`Players connected: ${data.playerCount}`);
-      let playersInfo = 'Players: ';
-      data.players.forEach(player => {
-        playersInfo += `${player.username}(${player.score}) `;
-      });
-      addMessage(playersInfo);
+      const playersInfo = data.players.map(p => `${p.username} (${p.score})`).join(', ');
+      addMessage(`Players: ${playersInfo}`);
     });
-    
-    // When the game starts, display the question.
+
     socket.on('gameStarted', (data) => {
-      addMessage(`Game Started! Question: ${data.question}`);
+      addMessage(`🎮 Game Started! Question: ${data.question}`);
+      gameControls.classList.remove('hidden');
     });
-    
-    // Handle game end events (either correct guess or time expired).
+
     socket.on('gameEnded', (data) => {
-      addMessage(`Game Ended: ${data.msg}`);
-      if(data.answer) {
-          addMessage(`The answer was: ${data.answer}`);
-      }
+      addMessage(`⏹️ Game Ended: ${data.msg}`);
+      if (data.answer) addMessage(`✔️ The answer was: ${data.answer}`);
+      if (data.winner) addMessage(`🏆 Winner: ${data.winner}`);
     });
-    
-    // Display generic messages.
-    socket.on('message', (data) => {
-      addMessage(data.msg);
-    });
-    
-    // Display chat messages.
+
     socket.on('chatMessage', (data) => {
       addMessage(`${data.username}: ${data.msg}`);
     });
-    
-    // Display error messages.
+
+    socket.on('message', (data) => {
+      addMessage(data.msg);
+    });
+
     socket.on('errorMsg', (data) => {
-      addMessage(`Error: ${data.msg}`);
+      addMessage(`❌ Error: ${data.msg}`);
     });
   </script>
 </body>

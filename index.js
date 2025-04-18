@@ -1,6 +1,5 @@
 const express = require('express')
 const {createServer} = require('node:http')
-const {join} = require('node:path')
 const {Server} = require('socket.io')
 
 const app = express()
@@ -18,12 +17,13 @@ let sessions = {};
 
 class GameSession{
     constructor(sessionId,masterId){
-        this.sessionId = sessionId;
-        this.masterId = masterId;
-        this.players = {};
-        this.answer = '';
-        this.gameInProgress = false;
-        this.timer = null;
+        this.sessionId = sessionId
+        this.masterId = masterId
+        this.players = {}
+        this.question =''
+        this.answer = ''
+        this.gameInProgress = false
+        this.timer = null
     }
 }
 
@@ -38,52 +38,62 @@ function updateSession(session){
 io.on('connection', (socket) => {
     console.log('New connection:  ' + socket.id);
 
-    socket.on('createSession', (data) => {
+    socket.on('createSession', ({username}) => {
+        if (!username?.trim()) {
+            socket.emit('errorMsg',{msg:'Username is required to create a session'});
+            return
+        }
+
         const sessionId = 'session-' + socket.id;
-        const newSession = new GameSession(sessionId,socket.id);
+        const session = new GameSession(sessionId, socket.id);
+
         //Add game master as a player
-        newSession.players[socket.id] = {username:data.username || 'Master', score:0, attempts:3};
-        sessions[sessionId] = newSession;
+        session.players[socket.id] = {username:username.trim(), score:0, attempts:3};
+        sessions[sessionId] = session;
+
         socket.join(sessionId);
         socket.emit('sessionCreated',{sessionId});
-        updateSession(newSession);
+        updateSession(session);
     });
 
     //Allow others users to join a session
-    socket.on('joinSession', (data) => {
-        const sessionId = data.sessionId.trim();
-        console.log('Join request for session:', sessionId);
-        const session = sessions[sessionId];
-        if (!session) {
-            socket.emit('errorMsg', {msg: 'Session does not exist'});
+    socket.on('joinSession', ({sessionId,username}) => {
+        if (!username?.trim()) {
+            socket.emit('errorMsg', {msg:'Username is required to join a session'});
             return;
         }
-        //prevent joining if game is in progress
+        const session = sessions[sessionId.trim()];
+        if (!session) {
+            socket.emit('errorMsg', {msg:'Session does not exist'})
+            return;
+        }
+
         if (session.gameInProgress) {
             socket.emit('errorMsg',{msg:'Game already in progress'})
             return;
         }
-        session.players[socket.id] = {username:data.username || 'Player', score:0, attempts:3};
-        socket.join(sessionId)
-        updateSession(session)
+
+        session.players[socket.id] = {username:username.trim(),score:0,attempts:3};
+        socket.join(sessionId);
+        updateSession(session);
     });
 
     //Game master sets the question and answer
-    socket.on('setQuestion', (data) => {
+    socket.on('setQuestion', ({question,answer}) => {
         //Find the session where this socket is the master
-        let session = Object.values(sessions).find(s => s.masterId === socket.id);
+        const session = Object.values(sessions).find(s => s.masterId === socket.id);
         if(!session){
             socket.emit('errorMsg', {msg: 'You are not a game master'});
             return
         }
-        session.question = data.question;
-        session.answer = data.answer;
+        session.question = question;
+        session.answer = answer;
         socket.emit('message',{msg:'Question and answer set. Ready to start the game.'});
     });
 
     //Start the game session(Only allowed by game master)
     socket.on('startGame',() =>{
-        let session = Object.values(sessions).find(s => s.masterId === socket.id);
+        const session = Object.values(sessions).find(s => s.masterId === socket.id);
         if (!session) {
             socket.emit('errorMsg',{msg:'You are not a game master'});
             return;
@@ -95,6 +105,8 @@ io.on('connection', (socket) => {
         }
         session.gameInProgress = true;
 
+        Object.values(session.players).forEach(p => p.attempts = 3);
+
         //Broadcast the question to all players
         io.to(session.sessionId).emit('gameStarted', {question:session.question});
         
@@ -103,51 +115,54 @@ io.on('connection', (socket) => {
             session.gameInProgress = false;
             io.to(session.sessionId).emit('gameEnded',{msg:'Time expired', answer:session.answer});
             //Reset attempts for the next round.
-            Object.keys(session.players).forEach(pid => session.players[pid].attempts = 3);
+            updateSession(session);
         },60000);
     });
 
     //Handle guesses from players
-    socket.on('guess',(data) => {
+    socket.on('guess',({guess}) => {
         //Find the session for this socket.
-        let session = Object.values(sessions).find(s => s.players[socket.id]);
+        const session = Object.values(sessions).find(s => s.players[socket.id]);
         if (!session || !session.gameInProgress) {
             socket.emit('errorMsg', {msg: 'No active game session for you'});
             return;
         }
         let player = session.players[socket.id];
+
         if (player.attempts <= 0) {
             socket.emit('message',{msg: 'No active game session for you'});
             return;
         }
         player.attempts -= 1;
+
         //check if the guess is correct
-        if(data.guess.toLowerCase() === session.answer.toLowerCase()){
+        if(guess.trim().toLowerCase() === session.answer.toLowerCase()){
             clearTimeout(session.timer);
             session.gameInProgress = false;
             player.score += 10;
             io.to(session.sessionId).emit('gameEnded',{
-                msg:`${player.username} has won! The answer was: ${session.answer}`,
-                winner:player.username
+                msg:`${player.username} has won!`,
+                winner:player.username,
+                answer:session.answer
             });
+            Object.values(session.players).forEach(p => p.attempts = 3);
             updateSession(session);
-            //Reset attempts for next round
-            Object.keys(session.players).forEach(pid => session.players[pid].attempts = 3);
-        }else{
+         }else{
             socket.emit('message',{msg: `Wrong guess. Attempts left: ${player.attempts}`})
+            updateSession(session);
         }
     });
 
     //Handle general chat messages
-    socket.on('chatMessage', (data) =>{
-        let session = Object.values(sessions).find(s => s.players[socket.id]);
+    socket.on('chatMessage', ({msg}) =>{//start here
+        const session = Object.values(sessions).find(s => s.players[socket.id]);
         if(!session){
             socket.emit('errorMsg',{msg:'You are not in a session'});
             return;
         }
         io.to(session.sessionId).emit('chatMessage',{
             username:session.players[socket.id].username,
-            msg:data.msg
+            msg
         });
     });
 
@@ -155,18 +170,23 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Disconnected: ' + socket.id);
         for(let sessionId in sessions){
-            let session = sessions[sessionId];
+            const session = sessions[sessionId];
+
             if (session.players[socket.id]) {
+                const isMaster = session.masterId === socket.id
+                const username = session.players[socket.id].username;
                 delete session.players[socket.id];
+
                 //If the game master disconnects, reassign a new one if possible.
-                 if(session.masterId === socket.id){
+                 if(isMaster){
                     const remaining = Object.keys(session.players);
-                    if (remaining.lenght > 0) {
+                    if (remaining.length > 0) {
                         session.masterId = remaining[0];
                         io.to(session.sessionId).emit('message',{msg: `${session.players[session.masterId].username} is the new game master.`});
                     }
                  }
                  updateSession(session);
+                
                  //Delete session if no players remain
                  if (Object.keys(session.players).length === 0) {
                     delete sessions[sessionId];
