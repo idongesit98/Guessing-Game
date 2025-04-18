@@ -1,6 +1,7 @@
 const express = require('express')
 const {createServer} = require('node:http')
 const {Server} = require('socket.io')
+require('dotenv').config()
 
 const app = express()
 const server = createServer(app)
@@ -197,7 +198,7 @@ io.on('connection', (socket) => {
     })
 })
 
-const PORT = 4040;
+const PORT = process.env.PORT || 4040;
 const HOST = '127.0.0.1';
 
 server.listen(PORT,HOST,() => {
